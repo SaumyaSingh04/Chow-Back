@@ -34,7 +34,8 @@ exports.getSubcategoriesByCategory = async (req, res) => {
 // Create subcategory
 exports.createSubcategory = async (req, res) => {
   try {
-    const subcategory = new Subcategory(req.body);
+    const { name, description, category, status } = req.body;
+    const subcategory = new Subcategory({ name, description, category, status });
     const savedSubcategory = await subcategory.save();
     res.status(201).json(savedSubcategory);
   } catch (error) {
@@ -45,7 +46,12 @@ exports.createSubcategory = async (req, res) => {
 // Update subcategory
 exports.updateSubcategory = async (req, res) => {
   try {
-    const subcategory = await Subcategory.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const { name, description, category, status } = req.body;
+    const subcategory = await Subcategory.findByIdAndUpdate(
+      req.params.id, 
+      { name, description, category, status }, 
+      { new: true }
+    );
     if (!subcategory) return res.status(404).json({ message: 'Subcategory not found' });
     res.json(subcategory);
   } catch (error) {

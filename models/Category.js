@@ -6,6 +6,10 @@ const categorySchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  description: {
+    type: String,
+    trim: true
+  },
   status: {
     type: String,
     enum: ['active', 'inactive'],

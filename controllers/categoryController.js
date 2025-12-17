@@ -24,7 +24,8 @@ exports.getCategoryById = async (req, res) => {
 // Create category
 exports.createCategory = async (req, res) => {
   try {
-    const category = new Category(req.body);
+    const { name, description, status } = req.body;
+    const category = new Category({ name, description, status });
     const savedCategory = await category.save();
     res.status(201).json(savedCategory);
   } catch (error) {
@@ -35,7 +36,12 @@ exports.createCategory = async (req, res) => {
 // Update category
 exports.updateCategory = async (req, res) => {
   try {
-    const category = await Category.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const { name, description, status } = req.body;
+    const category = await Category.findByIdAndUpdate(
+      req.params.id, 
+      { name, description, status }, 
+      { new: true }
+    );
     if (!category) return res.status(404).json({ message: 'Category not found' });
     res.json(category);
   } catch (error) {
