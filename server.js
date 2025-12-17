@@ -23,7 +23,6 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 const searchRoutes = require('./routes/searchRoutes');
 const ticketRoutes = require('./routes/tickets');
 const authRoutes = require('./routes/authRoutes');
-const adminRoutes = require('./routes/adminRoutes');
 
 app.use('/api/categories', categoryRoutes);
 app.use('/api/subcategories', subcategoryRoutes);
@@ -32,7 +31,6 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/admin', adminRoutes);
 
 // Basic route
 app.get('/', (req, res) => {
