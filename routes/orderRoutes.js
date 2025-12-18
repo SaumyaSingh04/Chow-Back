@@ -5,6 +5,9 @@ const orderController = require('../controllers/orderController');
 // Get all orders
 router.get('/', orderController.getAllOrders);
 
+// Get orders by user ID
+router.get('/my/:userId', orderController.getMyOrders);
+
 // Get order by ID
 router.get('/:id', orderController.getOrderById);
 

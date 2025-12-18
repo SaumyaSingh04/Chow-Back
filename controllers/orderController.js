@@ -125,16 +125,30 @@ exports.updateOrderAndPaymentStatus = async (req, res) => {
   }
 };
 
+// Get orders by user ID
+exports.getMyOrders = async (req, res) => {
+  try {
+    const orders = await Order.find({ userId: req.params.userId })
+      .populate('userId', 'name email phone')
+      .populate('items.itemId', 'name price')
+      .sort({ createdAt: -1 });
+    
+    res.json({ success: true, orders });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 // Create new order
 exports.createOrder = async (req, res) => {
   try {
-    const { userId, items, totalAmount } = req.body;
+    const { userId, addressId, items, totalAmount } = req.body;
 
-    if (!userId || !items || !totalAmount) {
-      return res.status(400).json({ success: false, message: 'UserId, items, and totalAmount are required' });
+    if (!userId || !addressId || !items || !totalAmount) {
+      return res.status(400).json({ success: false, message: 'UserId, addressId, items, and totalAmount are required' });
     }
 
-    const order = new Order({ userId, items, totalAmount });
+    const order = new Order({ userId, addressId, items, totalAmount });
     await order.save();
 
     const populatedOrder = await Order.findById(order._id)
