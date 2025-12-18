@@ -4,8 +4,27 @@ const { uploadToCloudinary } = require('../middleware/upload');
 // Get all items
 exports.getItems = async (req, res) => {
   try {
-    const items = await Item.find().populate('category subcategory');
-    res.json(items);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const items = await Item.find()
+      .populate('category subcategories')
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+    
+    const total = await Item.countDocuments();
+    
+    res.json({
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -14,7 +33,7 @@ exports.getItems = async (req, res) => {
 // Get item by ID
 exports.getItemById = async (req, res) => {
   try {
-    const item = await Item.findById(req.params.id).populate('category subcategory');
+    const item = await Item.findById(req.params.id).populate('category subcategories');
     if (!item) return res.status(404).json({ message: 'Item not found' });
     res.json(item);
   } catch (error) {
@@ -25,7 +44,7 @@ exports.getItemById = async (req, res) => {
 // Get items by category
 exports.getItemsByCategory = async (req, res) => {
   try {
-    const items = await Item.find({ category: req.params.categoryId }).populate('category subcategory');
+    const items = await Item.find({ category: req.params.categoryId }).populate('category subcategories');
     res.json(items);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -35,7 +54,7 @@ exports.getItemsByCategory = async (req, res) => {
 // Get items by subcategory
 exports.getItemsBySubcategory = async (req, res) => {
   try {
-    const items = await Item.find({ subcategory: req.params.subcategoryId }).populate('category subcategory');
+    const items = await Item.find({ subcategories: req.params.subcategoryId }).populate('category subcategories');
     res.json(items);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -56,7 +75,7 @@ exports.getFeaturedItems = async (req, res) => {
       default: return res.status(400).json({ message: 'Invalid type' });
     }
     
-    const items = await Item.find(query).populate('category subcategory');
+    const items = await Item.find(query).populate('category subcategories');
     res.json(items);
   } catch (error) {
     res.status(500).json({ message: error.message });

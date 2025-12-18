@@ -12,5 +12,6 @@ const verifyAdmin = (req, res, next) => {
 };
 
 router.get('/stats', verifyToken, verifyAdmin, dashboardController.getDashboardStats);
+router.get('/failed-orders', verifyToken, verifyAdmin, dashboardController.getFailedOrders);
 
 module.exports = router;

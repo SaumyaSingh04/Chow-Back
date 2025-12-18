@@ -11,10 +11,10 @@ const itemSchema = new mongoose.Schema({
     ref: 'Category',
     required: true
   },
-  subcategory: {
+  subcategories: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Subcategory'
-  },
+  }],
   price: {
     type: Number,
     required: true

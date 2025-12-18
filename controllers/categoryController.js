@@ -1,10 +1,28 @@
 const Category = require('../models/Category');
 
-// Get all categories
+// Get all categories with pagination
 exports.getCategories = async (req, res) => {
   try {
-    const categories = await Category.find();
-    res.json(categories);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const categories = await Category.find()
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+    
+    const total = await Category.countDocuments();
+    
+    res.json({
+      categories,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -24,8 +42,7 @@ exports.getCategoryById = async (req, res) => {
 // Create category
 exports.createCategory = async (req, res) => {
   try {
-    const { name, description, status } = req.body;
-    const category = new Category({ name, description, status });
+    const category = new Category(req.body);
     const savedCategory = await category.save();
     res.status(201).json(savedCategory);
   } catch (error) {
@@ -36,12 +53,7 @@ exports.createCategory = async (req, res) => {
 // Update category
 exports.updateCategory = async (req, res) => {
   try {
-    const { name, description, status } = req.body;
-    const category = await Category.findByIdAndUpdate(
-      req.params.id, 
-      { name, description, status }, 
-      { new: true }
-    );
+    const category = await Category.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!category) return res.status(404).json({ message: 'Category not found' });
     res.json(category);
   } catch (error) {

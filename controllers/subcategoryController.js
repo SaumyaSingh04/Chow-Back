@@ -1,10 +1,29 @@
 const Subcategory = require('../models/Subcategory');
 
-// Get all subcategories
+// Get all subcategories with pagination
 exports.getSubcategories = async (req, res) => {
   try {
-    const subcategories = await Subcategory.find().populate('category');
-    res.json(subcategories);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const subcategories = await Subcategory.find()
+      .populate('category')
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+    
+    const total = await Subcategory.countDocuments();
+    
+    res.json({
+      subcategories,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -24,7 +43,7 @@ exports.getSubcategoryById = async (req, res) => {
 // Get subcategories by category
 exports.getSubcategoriesByCategory = async (req, res) => {
   try {
-    const subcategories = await Subcategory.find({ category: req.params.categoryId });
+    const subcategories = await Subcategory.find({ category: req.params.categoryId }).populate('category');
     res.json(subcategories);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -34,8 +53,7 @@ exports.getSubcategoriesByCategory = async (req, res) => {
 // Create subcategory
 exports.createSubcategory = async (req, res) => {
   try {
-    const { name, description, category, status } = req.body;
-    const subcategory = new Subcategory({ name, description, category, status });
+    const subcategory = new Subcategory(req.body);
     const savedSubcategory = await subcategory.save();
     res.status(201).json(savedSubcategory);
   } catch (error) {
@@ -46,12 +64,7 @@ exports.createSubcategory = async (req, res) => {
 // Update subcategory
 exports.updateSubcategory = async (req, res) => {
   try {
-    const { name, description, category, status } = req.body;
-    const subcategory = await Subcategory.findByIdAndUpdate(
-      req.params.id, 
-      { name, description, category, status }, 
-      { new: true }
-    );
+    const subcategory = await Subcategory.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!subcategory) return res.status(404).json({ message: 'Subcategory not found' });
     res.json(subcategory);
   } catch (error) {

@@ -57,3 +57,17 @@ exports.getDashboardStats = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+// Get failed orders
+exports.getFailedOrders = async (req, res) => {
+  try {
+    const failedOrders = await Order.find({ status: 'failed' })
+      .populate('customerId', 'name email phone')
+      .populate('items.itemId', 'name price')
+      .sort({ createdAt: -1 });
+    
+    res.json({ success: true, orders: failedOrders });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
