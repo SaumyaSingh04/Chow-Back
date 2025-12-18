@@ -13,7 +13,7 @@ exports.getUserAddresses = async (req, res) => {
       _id: addr._id
     }));
     
-    console.log('Returning addresses:', addressesWithId);
+
     res.json({ success: true, addresses: addressesWithId });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -32,7 +32,7 @@ exports.addAddress = async (req, res) => {
     await user.save();
     
     const newAddress = user.address[user.address.length - 1];
-    console.log('New address ID:', newAddress._id);
+
     
     res.status(201).json({ 
       success: true, 

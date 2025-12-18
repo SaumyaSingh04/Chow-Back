@@ -77,8 +77,6 @@ exports.updateOrderStatus = async (req, res) => {
             );
             if (!updatedItem) {
               console.warn(`Item with ID ${item.itemId} not found for stock update`);
-            } else {
-              console.log(`Stock updated for item ${updatedItem.name}: ${updatedItem.stockQty}`);
             }
           } else {
             console.warn('Item ID is missing for stock update');
@@ -207,7 +205,7 @@ exports.getMyOrders = async (req, res) => {
 // Create new order
 exports.createOrder = async (req, res) => {
   try {
-    console.log('Creating order with data:', req.body);
+
     const { userId, addressId, items, totalAmount } = req.body;
 
     if (!userId || !addressId || !items || !totalAmount) {
@@ -216,7 +214,7 @@ exports.createOrder = async (req, res) => {
 
     const order = new Order({ userId, addressId, items, totalAmount });
     await order.save();
-    console.log('Order saved successfully');
+
 
     const populatedOrder = await Order.findById(order._id)
       .populate('userId', 'name email phone address')
