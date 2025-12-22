@@ -26,7 +26,12 @@ const calculateDistance = async (req, res) => {
     ]);
 
     if (!baseCoords || !userCoords) {
-      return res.json({ distance: 100, fee: 100 });
+      return res.status(200).json({
+        success: false,
+        message: 'Pincode not serviceable',
+        distance: null,
+        fee: null
+      });
     }
 
     // Try OSRM first
@@ -38,7 +43,11 @@ const calculateDistance = async (req, res) => {
       
       if (data.routes?.[0]?.distance) {
         const distance = Math.round(data.routes[0].distance / 1000 * 100) / 100;
-        return res.json({ distance, fee: calculateFee(distance) });
+        return res.json({ 
+          success: true,
+          distance, 
+          fee: calculateFee(distance) 
+        });
       }
     } catch (error) {
       console.error('OSRM error:', error);
@@ -46,11 +55,20 @@ const calculateDistance = async (req, res) => {
 
     // Fallback to Haversine
     const distance = haversineDistance(baseCoords[1], baseCoords[0], userCoords[1], userCoords[0]);
-    res.json({ distance, fee: calculateFee(distance) });
+    res.json({ 
+      success: true,
+      distance, 
+      fee: calculateFee(distance) 
+    });
 
   } catch (error) {
     console.error('Distance calculation error:', error);
-    res.status(500).json({ message: 'Error calculating distance', distance: 100, fee: 100 });
+    res.status(500).json({ 
+      success: false,
+      message: 'Error calculating distance',
+      distance: null,
+      fee: null
+    });
   }
 };
 
