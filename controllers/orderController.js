@@ -56,19 +56,6 @@ exports.updateOrderStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    // Update stock when order is delivered
-    if (status === 'delivered' && order.status !== 'delivered') {
-      await Promise.all(order.items.map(async (item) => {
-        if (item.itemId) {
-          await Item.findByIdAndUpdate(
-            item.itemId,
-            { $inc: { stockQty: -item.quantity } },
-            { new: true }
-          ).catch(err => console.error(`Stock update failed for ${item.itemId}:`, err));
-        }
-      }));
-    }
-
     order.status = status;
     await order.save();
 
@@ -152,6 +139,17 @@ exports.createOrder = async (req, res) => {
 
     const order = new Order(orderData);
     await order.save();
+
+    // Update stock immediately when order is created
+    await Promise.all(order.items.map(async (item) => {
+      if (item.itemId) {
+        await Item.findByIdAndUpdate(
+          item.itemId,
+          { $inc: { stockQty: -item.quantity } },
+          { new: true }
+        ).catch(err => console.error(`Stock update failed for ${item.itemId}:`, err));
+      }
+    }));
 
     const populatedOrder = await Order.findById(order._id)
       .populate('userId', 'name email phone address')
