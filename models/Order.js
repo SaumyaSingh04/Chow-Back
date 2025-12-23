@@ -70,6 +70,9 @@ const orderSchema = new mongoose.Schema({
     tax: Number,
     errorCode: String,
     errorDescription: String,
+    errorSource: String,
+    errorStep: String,
+    errorReason: String,
     createdAt: { type: Date, default: Date.now }
   }]
 }, {

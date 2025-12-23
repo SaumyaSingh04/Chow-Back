@@ -42,7 +42,10 @@ exports.getDashboardStats = async (req, res) => {
       ]),
       Order.countDocuments({
         createdAt: { $gte: today, $lt: tomorrow },
-        status: 'failed'
+        $or: [
+          { status: 'failed' },
+          { paymentStatus: 'failed' }
+        ]
       })
     ]);
 
@@ -61,12 +64,22 @@ exports.getDashboardStats = async (req, res) => {
 // Get failed orders
 exports.getFailedOrders = async (req, res) => {
   try {
-    const failedOrders = await Order.find({ status: 'failed' })
-      .populate('customerId', 'name email phone')
+    const failedOrders = await Order.find({
+      $or: [
+        { status: 'failed' },
+        { paymentStatus: 'failed' }
+      ]
+    })
+      .populate('userId', 'name email phone address')
       .populate('items.itemId', 'name price')
       .sort({ createdAt: -1 });
     
-    res.json({ success: true, orders: failedOrders });
+    const ordersWithAddress = failedOrders.map(order => ({
+      ...order.toObject(),
+      deliveryAddress: order.userId?.address?.id(order.addressId) || null
+    }));
+    
+    res.json({ success: true, orders: ordersWithAddress });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
