@@ -11,15 +11,73 @@ exports.getFailedOrders = async (req, res) => {
       ]
     })
       .populate('userId', 'name email phone address')
-      .populate('items.itemId', 'name price')
+      .populate('items.itemId', 'name price category subcategory')
       .sort({ createdAt: -1 });
     
-    const ordersWithAddress = failedOrders.map(order => ({
-      ...order.toObject(),
-      deliveryAddress: order.userId?.address?.id(order.addressId) || null
-    }));
+    const tableData = [];
     
-    res.json({ success: true, orders: ordersWithAddress });
+    failedOrders.forEach(order => {
+      const orderObj = order.toObject();
+      
+      // Find delivery address
+      const deliveryAddress = orderObj.userId?.address?.find(addr => 
+        addr._id.toString() === orderObj.addressId.toString()
+      ) || {};
+      
+      // Calculate totals
+      const subtotal = orderObj.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      const tax = Math.round(subtotal * 0.05 * 100) / 100;
+      const deliveryCharge = orderObj.deliveryFee || 0;
+      
+      // Get payment info
+      const latestPayment = orderObj.razorpayData?.[orderObj.razorpayData.length - 1] || {};
+      
+      // Create one row per order with all details
+      tableData.push({
+        orderId: orderObj._id,
+        orderDate: orderObj.createdAt,
+        customerName: orderObj.userId?.name || 'N/A',
+        customerEmail: orderObj.userId?.email || 'N/A',
+        customerPhone: orderObj.userId?.phone || 'N/A',
+        
+        // Address details
+        deliveryAddress: `${deliveryAddress.firstName || ''} ${deliveryAddress.lastName || ''}, ${deliveryAddress.street || ''}, ${deliveryAddress.city || ''}, ${deliveryAddress.state || ''} - ${deliveryAddress.postcode || ''}`.trim(),
+        
+        // Items (both formats)
+        items: orderObj.items,
+        itemsString: orderObj.items.map(item => 
+          `${item.itemId?.name || 'Unknown'} (Qty: ${item.quantity}, Price: ₹${item.price})`
+        ).join(', '),
+        
+        // Order totals
+        subtotal: subtotal,
+        tax: tax,
+        deliveryCharge: deliveryCharge,
+        totalAmount: orderObj.totalAmount,
+        
+        // Order status
+        orderStatus: orderObj.status,
+        paymentStatus: orderObj.paymentStatus,
+        
+        // Complete Razorpay data array
+        razorpayData: orderObj.razorpayData || [],
+        
+        // Individual Razorpay details (for backward compatibility)
+        razorpayOrderId: latestPayment.orderId || 'N/A',
+        razorpayPaymentId: latestPayment.paymentId || 'N/A',
+        paymentMethod: latestPayment.method || 'N/A',
+        paymentBank: latestPayment.bank || 'N/A',
+        paymentAmount: latestPayment.amount ? (latestPayment.amount / 100) : 0,
+        paymentFee: latestPayment.fee || 0,
+        paymentTax: latestPayment.tax || 0,
+        paymentDate: latestPayment.createdAt || null,
+        
+        // Distance
+        distance: orderObj.distance || 0
+      });
+    });
+    
+    res.json({ success: true, orders: tableData });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -30,15 +88,73 @@ exports.getAllOrders = async (req, res) => {
   try {
     const orders = await Order.find()
       .populate('userId', 'name email phone address')
-      .populate('items.itemId', 'name price')
+      .populate('items.itemId', 'name price category subcategory')
       .sort({ createdAt: -1 });
     
-    const ordersWithAddress = orders.map(order => ({
-      ...order.toObject(),
-      deliveryAddress: order.userId?.address?.id(order.addressId) || null
-    }));
+    const tableData = [];
     
-    res.json({ success: true, orders: ordersWithAddress });
+    orders.forEach(order => {
+      const orderObj = order.toObject();
+      
+      // Find delivery address
+      const deliveryAddress = orderObj.userId?.address?.find(addr => 
+        addr._id.toString() === orderObj.addressId.toString()
+      ) || {};
+      
+      // Calculate totals
+      const subtotal = orderObj.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      const tax = Math.round(subtotal * 0.05 * 100) / 100;
+      const deliveryCharge = orderObj.deliveryFee || 0;
+      
+      // Get payment info
+      const latestPayment = orderObj.razorpayData?.[orderObj.razorpayData.length - 1] || {};
+      
+      // Create one row per order with all details
+      tableData.push({
+        orderId: orderObj._id,
+        orderDate: orderObj.createdAt,
+        customerName: orderObj.userId?.name || 'N/A',
+        customerEmail: orderObj.userId?.email || 'N/A',
+        customerPhone: orderObj.userId?.phone || 'N/A',
+        
+        // Address details
+        deliveryAddress: `${deliveryAddress.firstName || ''} ${deliveryAddress.lastName || ''}, ${deliveryAddress.street || ''}, ${deliveryAddress.city || ''}, ${deliveryAddress.state || ''} - ${deliveryAddress.postcode || ''}`.trim(),
+        
+        // Items (both formats)
+        items: orderObj.items,
+        itemsString: orderObj.items.map(item => 
+          `${item.itemId?.name || 'Unknown'} (Qty: ${item.quantity}, Price: ₹${item.price})`
+        ).join(', '),
+        
+        // Order totals
+        subtotal: Math.round(subtotal * 100) / 100,
+        tax: tax,
+        deliveryCharge: deliveryCharge,
+        totalAmount: orderObj.totalAmount,
+        
+        // Order status
+        orderStatus: orderObj.status,
+        paymentStatus: orderObj.paymentStatus,
+        
+        // Complete Razorpay data array
+        razorpayData: orderObj.razorpayData || [],
+        
+        // Individual Razorpay details (for backward compatibility)
+        razorpayOrderId: latestPayment.orderId || 'N/A',
+        razorpayPaymentId: latestPayment.paymentId || 'N/A',
+        paymentMethod: latestPayment.method || 'N/A',
+        paymentBank: latestPayment.bank || 'N/A',
+        paymentAmount: latestPayment.amount ? (latestPayment.amount / 100) : 0,
+        paymentFee: latestPayment.fee || 0,
+        paymentTax: latestPayment.tax || 0,
+        paymentDate: latestPayment.createdAt || null,
+        
+        // Distance
+        distance: orderObj.distance || 0
+      });
+    });
+    
+    res.json({ success: true, orders: tableData });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -49,18 +165,48 @@ exports.getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
       .populate('userId', 'name email phone address')
-      .populate('items.itemId', 'name price');
+      .populate('items.itemId', 'name price category subcategory');
     
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    const orderWithAddress = {
-      ...order.toObject(),
-      deliveryAddress: order.userId?.address?.id(order.addressId) || null
+    const orderObj = order.toObject();
+    
+    // Find delivery address
+    const deliveryAddress = orderObj.userId?.address?.find(addr => 
+      addr._id.toString() === orderObj.addressId.toString()
+    ) || null;
+    
+    // Calculate subtotal, tax, and other details
+    const subtotal = orderObj.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const tax = subtotal * 0.05; // 5% tax
+    const deliveryCharge = orderObj.deliveryFee || 0;
+    
+    const orderWithDetails = {
+      ...orderObj,
+      deliveryAddress,
+      orderSummary: {
+        subtotal,
+        tax,
+        deliveryCharge,
+        totalAmount: orderObj.totalAmount
+      },
+      itemDetails: orderObj.items.map(item => ({
+        itemName: item.itemId?.name || 'Item not found',
+        quantity: item.quantity,
+        price: item.price,
+        total: item.price * item.quantity,
+        category: item.itemId?.category,
+        subcategory: item.itemId?.subcategory
+      })),
+      paymentDetails: {
+        paymentStatus: orderObj.paymentStatus,
+        razorpayTransactions: orderObj.razorpayData || []
+      }
     };
 
-    res.json({ success: true, order: orderWithAddress });
+    res.json({ success: true, order: orderWithDetails });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
