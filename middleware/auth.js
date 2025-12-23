@@ -23,13 +23,6 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-const verifyUser = (req, res, next) => {
-  if (req.user.role !== 'user') {
-    return res.status(403).json({ message: 'User access required' });
-  }
-  next();
-};
-
 const verifyAdmin = (req, res, next) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ message: 'Admin access required' });
@@ -37,4 +30,4 @@ const verifyAdmin = (req, res, next) => {
   next();
 };
 
-module.exports = { verifyToken, verifyUser, verifyAdmin };
+module.exports = { verifyToken, verifyAdmin };

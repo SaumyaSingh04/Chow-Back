@@ -61,26 +61,3 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
-// Get failed orders
-exports.getFailedOrders = async (req, res) => {
-  try {
-    const failedOrders = await Order.find({
-      $or: [
-        { status: 'failed' },
-        { paymentStatus: 'failed' }
-      ]
-    })
-      .populate('userId', 'name email phone address')
-      .populate('items.itemId', 'name price')
-      .sort({ createdAt: -1 });
-    
-    const ordersWithAddress = failedOrders.map(order => ({
-      ...order.toObject(),
-      deliveryAddress: order.userId?.address?.id(order.addressId) || null
-    }));
-    
-    res.json({ success: true, orders: ordersWithAddress });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
