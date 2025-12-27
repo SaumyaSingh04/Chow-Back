@@ -91,7 +91,7 @@ exports.verifyPayment = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid signature' });
     }
 
-    // Store payment ID for webhook processing - DO NOT finalize here
+    // Store payment ID for webhook processing
     order.razorpayData.push({
       orderId: razorpay_order_id,
       paymentId: razorpay_payment_id,
@@ -101,7 +101,36 @@ exports.verifyPayment = async (req, res) => {
     
     await order.save();
 
-    res.json({ success: true, orderId: order._id, message: 'Processing payment...' });
+    // Auto-confirm payment since webhooks don't work in test environment
+    try {
+      const payment = await razorpay.payments.fetch(razorpay_payment_id);
+      
+      if (payment.status === 'captured') {
+        // Check if order is still in valid state for confirmation
+        const currentOrder = await Order.findById(dbOrderId);
+        if (currentOrder && currentOrder.paymentStatus === 'pending' && currentOrder.status !== 'cancelled') {
+          currentOrder.paymentStatus = 'paid';
+          currentOrder.status = 'confirmed';
+          currentOrder.confirmedAt = new Date();
+
+          currentOrder.razorpayData.push({
+            paymentId: payment.id,
+            amount: payment.amount,
+            status: 'paid',
+            method: payment.method,
+            source: 'auto_confirmation',
+            createdAt: new Date()
+          });
+
+          await currentOrder.save();
+          await updateStock(currentOrder.items);
+        }
+      }
+    } catch (err) {
+      console.log('Auto-confirmation failed:', err.message);
+    }
+
+    res.json({ success: true, orderId: order._id });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Payment verification failed' });
   }
@@ -121,16 +150,19 @@ exports.handlePaymentFailure = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Already paid' });
     }
 
-    order.status = 'cancelled';
-    order.paymentStatus = 'cancelled';
-    order.cancelledAt = new Date();
-    order.razorpayData.push({
-      status: 'cancelled',
-      errorReason: reason || 'User cancelled payment',
-      createdAt: new Date()
-    });
+    // Only cancel if not already confirmed
+    if (order.status !== 'confirmed') {
+      order.status = 'cancelled';
+      order.paymentStatus = 'cancelled';
+      order.cancelledAt = new Date();
+      order.razorpayData.push({
+        status: 'cancelled',
+        errorReason: reason || 'User cancelled payment',
+        createdAt: new Date()
+      });
 
-    await order.save();
+      await order.save();
+    }
 
     res.json({ success: true, orderId: order._id });
   } catch (err) {
@@ -268,6 +300,34 @@ exports.confirmPayment = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+/* -------------------- FIX INCONSISTENT ORDERS -------------------- */
+exports.fixInconsistentOrders = async (req, res) => {
+  try {
+    // Find orders that are both cancelled and confirmed
+    const inconsistentOrders = await Order.find({
+      $and: [
+        { cancelledAt: { $exists: true } },
+        { confirmedAt: { $exists: true } }
+      ]
+    });
+
+    let fixed = 0;
+    for (const order of inconsistentOrders) {
+      // If payment is actually captured, keep it confirmed
+      if (order.paymentStatus === 'paid') {
+        order.status = 'confirmed';
+        order.cancelledAt = undefined;
+        await order.save();
+        fixed++;
+      }
+    }
+
+    res.json({ success: true, fixed });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 exports.cleanFailedOrders = async (req, res) => {
   try {
     const result = await Order.deleteMany({
@@ -290,3 +350,4 @@ exports.cleanFailedOrders = async (req, res) => {
     res.status(500).json({ success: false, message: 'Cleanup failed' });
   }
 };
+
