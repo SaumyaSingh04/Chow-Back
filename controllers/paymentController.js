@@ -6,6 +6,10 @@ const razorpay = require('../config/razorpay');
 
 const updateStock = async (items = []) => {
   for (const i of items) {
+    const item = await Item.findById(i.itemId);
+    if (!item || item.stockQty < i.quantity) {
+      throw new Error(`Insufficient stock for item ${i.itemId}`);
+    }
     await Item.findByIdAndUpdate(
       i.itemId,
       { $inc: { stockQty: -i.quantity } }
@@ -51,6 +55,8 @@ exports.createOrder = async (req, res) => {
         createdAt: new Date()
       }]
     });
+
+    await updateStock(orderData.items);
 
     res.json({
       success: true,
@@ -224,7 +230,7 @@ exports.razorpayWebhook = async (req, res) => {
       });
 
       await order.save();
-      await updateStock(order.items);
+      // Stock already updated during order creation
       
       console.log('Payment confirmed via webhook');
     }
@@ -280,7 +286,7 @@ exports.confirmPayment = async (req, res) => {
       });
 
       await order.save();
-      await updateStock(order.items);
+      // Stock already updated during order creation
       
       return res.json({ success: true, message: 'Payment confirmed' });
     }

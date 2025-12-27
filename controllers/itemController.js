@@ -44,7 +44,7 @@ exports.getItemById = async (req, res) => {
 // Get items by category
 exports.getItemsByCategory = async (req, res) => {
   try {
-    const items = await Item.find({ categories: req.params.categoryId }).populate('categories subcategories');
+    const items = await Item.find({ categories: req.params.categoryId, stockQty: { $gt: 0 } }).populate('categories subcategories');
     res.json(items);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -54,7 +54,7 @@ exports.getItemsByCategory = async (req, res) => {
 // Get items by subcategory
 exports.getItemsBySubcategory = async (req, res) => {
   try {
-    const items = await Item.find({ subcategories: req.params.subcategoryId }).populate('category subcategories');
+    const items = await Item.find({ subcategories: req.params.subcategoryId, stockQty: { $gt: 0 } }).populate('category subcategories');
     res.json(items);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -65,7 +65,7 @@ exports.getItemsBySubcategory = async (req, res) => {
 exports.getFeaturedItems = async (req, res) => {
   try {
     const { type } = req.params;
-    let query = {};
+    let query = { stockQty: { $gt: 0 } };
     
     switch(type) {
       case 'bestseller': query.isBestSeller = true; break;
