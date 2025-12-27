@@ -41,6 +41,10 @@ const orderSchema = new mongoose.Schema({
     required: true,
     min: 0
   },
+  currency: {
+    type: String,
+    default: 'INR'
+  },
   status: {
     type: String,
     enum: ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled', 'failed'],
@@ -49,32 +53,22 @@ const orderSchema = new mongoose.Schema({
   },
   paymentStatus: {
     type: String,
-    enum: ['pending', 'paid', 'failed'],
+    enum: ['pending', 'paid', 'failed', 'cancelled'],
     default: 'pending',
     index: true
   },
   razorpayData: [{
     orderId: String,
     paymentId: String,
-    signature: String,
     amount: Number,
     currency: String,
     status: String,
     method: String,
-    bank: String,
-    wallet: String,
-    vpa: String,
-    email: String,
-    contact: String,
-    fee: Number,
-    tax: Number,
-    errorCode: String,
-    errorDescription: String,
-    errorSource: String,
-    errorStep: String,
     errorReason: String,
     createdAt: { type: Date, default: Date.now }
-  }]
+  }],
+  confirmedAt: Date,
+  cancelledAt: Date
 }, {
   timestamps: true
 });
