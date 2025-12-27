@@ -12,6 +12,7 @@ const FAILED_ORDER_QUERY = {
   $or: [
     { status: 'failed' },
     { status: 'cancelled' },
+    { status: 'pending' },
     { paymentStatus: 'failed' }
   ]
 };
