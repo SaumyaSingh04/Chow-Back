@@ -21,7 +21,8 @@ const routes = [
   { path: '/api/users', module: './routes/userRoutes' },
   { path: '/api/admin', module: './routes/adminRoutes' },
   { path: '/api', module: './routes/distanceRoutes' },
-  { path: '/api/payment', module: './routes/paymentRoutes' }
+  { path: '/api/payment', module: './routes/paymentRoutes' },
+  { path: '/api/sweet-deals', module: './routes/sweetDealRoutes' }
 ];
 
 const startServer = async () => {
