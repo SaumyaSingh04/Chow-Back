@@ -60,6 +60,7 @@ const orderSchema = new mongoose.Schema({
   razorpayData: [{
     orderId: String,
     paymentId: String,
+    signature: String,
     amount: Number,
     currency: String,
     status: String,

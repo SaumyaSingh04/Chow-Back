@@ -44,7 +44,11 @@ exports.getDashboardStats = async (req, res) => {
       ]),
       Order.countDocuments({
         createdAt: todayRange,
-        $or: [{ status: 'failed' }, { paymentStatus: 'failed' }]
+        $or: [
+          { status: 'failed' },
+          { paymentStatus: 'failed' },
+          { status: 'cancelled', paymentStatus: 'cancelled' }
+        ]
       })
     ]);
 
@@ -52,7 +56,7 @@ exports.getDashboardStats = async (req, res) => {
       newOrders,
       totalCustomers,
       ticketsResolved,
-      revenueToday: revenueToday[0]?.total || 0,
+      revenueToday: (revenueToday[0]?.total || 0) / 100,
       failedOrders
     });
   } catch (error) {
