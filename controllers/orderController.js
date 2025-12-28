@@ -1,47 +1,206 @@
 const Order = require('../models/Order');
 
-// Get all orders
-exports.getAllOrders = async (req, res) => {
-  try {
-    const orders = await Order.find()
+const TAX_RATE = 0.05;
+
+/* -------------------- QUERIES -------------------- */
+const SUCCESS_ORDER_QUERY = {
+  status: { $in: ['confirmed', 'shipped', 'delivered'] },
+  paymentStatus: 'paid'
+};
+
+const FAILED_ORDER_QUERY = {
+  $or: [
+    { status: 'failed' },
+    { status: 'cancelled' },
+    { status: 'pending' },
+    { paymentStatus: 'failed' }
+  ]
+};
+
+/* -------------------- HELPERS -------------------- */
+const formatAddress = (address) => {
+  if (!address) return 'Address not available';
+
+  const {
+    firstName = '',
+    lastName = '',
+    street = '',
+    city = '',
+    state = '',
+    postcode = ''
+  } = address;
+
+  return `${firstName} ${lastName}, ${street}, ${city}, ${state} - ${postcode}`.trim();
+};
+
+const calculateOrderTotals = (items = [], deliveryFee = 0) => {
+  const subtotal = items.reduce(
+    (sum, i) => sum + i.price * i.quantity,
+    0
+  );
+
+  const tax = +(subtotal * TAX_RATE).toFixed(2);
+
+  return {
+    subtotal: +subtotal.toFixed(2),
+    tax,
+    deliveryCharge: deliveryFee
+  };
+};
+
+const getDeliveryAddress = (order) => {
+  if (!order.userId?.address || !order.addressId) return null;
+
+  return (
+    order.userId.address.find(
+      (a) => String(a._id) === String(order.addressId)
+    ) || null
+  );
+};
+
+const formatOrderData = (order) => {
+  const o = order.toObject();
+
+  const deliveryAddress = getDeliveryAddress(o);
+  const { subtotal, tax, deliveryCharge } = calculateOrderTotals(
+    o.items,
+    o.deliveryFee
+  );
+
+  const latestPayment = o.razorpayData?.at(-1) || {};
+
+  return {
+    orderId: o._id,
+    orderDate: o.createdAt,
+
+    customerName: o.userId?.name || 'N/A',
+    customerEmail: o.userId?.email || 'N/A',
+    customerPhone: o.userId?.phone || 'N/A',
+
+    deliveryAddress: formatAddress(deliveryAddress),
+
+    items: o.items,
+    itemsString: o.items
+      .map(
+        (i) =>
+          `${i.itemId?.name || 'Unknown'} (Qty: ${i.quantity}, ₹${i.price})`
+      )
+      .join(', '),
+
+    subtotal,
+    tax,
+    deliveryCharge,
+    totalAmount: o.totalAmount,
+
+    orderStatus: o.status,
+    paymentStatus: o.paymentStatus,
+
+    razorpayOrderId: latestPayment.orderId || null,
+    razorpayPaymentId: latestPayment.paymentId || null,
+    paymentMethod: latestPayment.method || null,
+    paymentAmount: latestPayment.amount ? latestPayment.amount / 100 : 0,
+
+    distance: o.distance || 0
+  };
+};
+
+const getOrdersWithPagination = async (query, page, limit) => {
+  const skip = (page - 1) * limit;
+
+  const [orders, total] = await Promise.all([
+    Order.find(query)
       .populate('userId', 'name email phone address')
-      .populate('items.itemId', 'name price');
-    
-    const ordersWithAddress = orders.map(order => {
-      const addressDetails = order.userId.address.id(order.addressId);
-      return {
-        ...order.toObject(),
-        deliveryAddress: addressDetails
-      };
-    });
-    
-    res.json({ success: true, orders: ordersWithAddress });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+      .populate('items.itemId', 'name price category subcategory')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    Order.countDocuments(query)
+  ]);
+
+  return {
+    orders: orders.map(formatOrderData),
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit)
+    }
+  };
+};
+
+/* -------------------- CONTROLLERS -------------------- */
+
+// Failed orders
+exports.getFailedOrders = async (req, res) => {
+  try {
+    const page = +req.query.page || 1;
+    const limit = +req.query.limit || 10;
+
+    const result = await getOrdersWithPagination(
+      FAILED_ORDER_QUERY,
+      page,
+      limit
+    );
+
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// Get order by ID
+// Successful orders
+exports.getAllOrders = async (req, res) => {
+  try {
+    const page = +req.query.page || 1;
+    const limit = +req.query.limit || 10;
+
+    const result = await getOrdersWithPagination(
+      SUCCESS_ORDER_QUERY,
+      page,
+      limit
+    );
+
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// Order by ID
 exports.getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
       .populate('userId', 'name email phone address')
-      .populate('items.itemId', 'name price');
-    
+      .populate('items.itemId', 'name price category subcategory');
+
     if (!order) {
-      return res.status(404).json({ success: false, message: 'Order not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
     }
 
-    // Get address details from user's saved addresses
-    const addressDetails = order.userId.address.id(order.addressId);
-    const orderWithAddress = {
-      ...order.toObject(),
-      deliveryAddress: addressDetails
-    };
+    const o = order.toObject();
+    const deliveryAddress = getDeliveryAddress(o);
+    const summary = calculateOrderTotals(o.items, o.deliveryFee);
 
-    res.json({ success: true, order: orderWithAddress });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.json({
+      success: true,
+      order: {
+        ...o,
+        deliveryAddress,
+        orderSummary: {
+          ...summary,
+          totalAmount: o.totalAmount
+        },
+        paymentDetails: {
+          paymentStatus: o.paymentStatus,
+          razorpayTransactions: o.razorpayData || []
+        }
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
@@ -49,191 +208,76 @@ exports.getOrderById = async (req, res) => {
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    
-    if (!status) {
-      return res.status(400).json({ success: false, message: 'Status is required' });
-    }
+    if (!status)
+      return res.status(400).json({ success: false, message: 'Status required' });
 
-    const validStatuses = ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled', 'failed'];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ success: false, message: 'Invalid status' });
-    }
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true, runValidators: true }
+    );
 
-    const order = await Order.findById(req.params.id);
-    if (!order) {
+    if (!order)
       return res.status(404).json({ success: false, message: 'Order not found' });
-    }
 
-    // Update stock when order is delivered
-    if (status === 'delivered' && order.status !== 'delivered') {
-      const Item = require('../models/Item');
-      for (const item of order.items) {
-        try {
-          if (item.itemId) {
-            const updatedItem = await Item.findByIdAndUpdate(
-              item.itemId,
-              { $inc: { stockQty: -item.quantity } },
-              { new: true }
-            );
-            if (!updatedItem) {
-              console.warn(`Item with ID ${item.itemId} not found for stock update`);
-            }
-          } else {
-            console.warn('Item ID is missing for stock update');
-          }
-        } catch (stockError) {
-          console.error(`Error updating stock for item ${item.itemId}:`, stockError.message);
-        }
-      }
-    }
-
-    order.status = status;
-    await order.save();
-
-    const updatedOrder = await Order.findById(order._id)
-      .populate('userId', 'name email phone')
-      .populate('items.itemId', 'name price');
-
-    res.json({ success: true, message: 'Order status updated successfully', order: updatedOrder });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.json({ success: true, order });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// Update payment status
+// Update payment status (ADMIN / SYSTEM ONLY)
 exports.updatePaymentStatus = async (req, res) => {
   try {
     const { paymentStatus } = req.body;
-    
-    if (!paymentStatus) {
-      return res.status(400).json({ success: false, message: 'Payment status is required' });
-    }
-
-    const validPaymentStatuses = ['pending', 'paid', 'failed'];
-    if (!validPaymentStatuses.includes(paymentStatus)) {
-      return res.status(400).json({ success: false, message: 'Invalid payment status' });
-    }
+    if (!paymentStatus)
+      return res
+        .status(400)
+        .json({ success: false, message: 'Payment status required' });
 
     const order = await Order.findByIdAndUpdate(
       req.params.id,
       { paymentStatus },
       { new: true, runValidators: true }
-    ).populate('userId', 'name email phone').populate('items.itemId', 'name price');
+    );
 
-    if (!order) {
+    if (!order)
       return res.status(404).json({ success: false, message: 'Order not found' });
-    }
 
-    res.json({ success: true, message: 'Payment status updated successfully', order });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.json({ success: true, order });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// Update both order and payment status
-exports.updateOrderAndPaymentStatus = async (req, res) => {
-  try {
-    const { status, paymentStatus } = req.body;
-    const updateData = {};
-
-    if (status) {
-      const validStatuses = ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled', 'failed'];
-      if (!validStatuses.includes(status)) {
-        return res.status(400).json({ success: false, message: 'Invalid status' });
-      }
-      updateData.status = status;
-    }
-
-    if (paymentStatus) {
-      const validPaymentStatuses = ['pending', 'paid', 'failed'];
-      if (!validPaymentStatuses.includes(paymentStatus)) {
-        return res.status(400).json({ success: false, message: 'Invalid payment status' });
-      }
-      updateData.paymentStatus = paymentStatus;
-    }
-
-    if (Object.keys(updateData).length === 0) {
-      return res.status(400).json({ success: false, message: 'At least one status field is required' });
-    }
-
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    ).populate('userId', 'name email phone').populate('items.itemId', 'name price');
-
-    if (!order) {
-      return res.status(404).json({ success: false, message: 'Order not found' });
-    }
-
-    res.json({ success: true, message: 'Order updated successfully', order });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
-
-// Get orders by user ID
+// My orders
 exports.getMyOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ userId: req.params.userId })
+    const orders = await Order.find({
+      userId: req.params.userId,
+      ...SUCCESS_ORDER_QUERY
+    })
       .populate('userId', 'name email phone address')
       .populate('items.itemId', 'name price')
       .sort({ createdAt: -1 });
-    
-    const ordersWithAddress = orders.map(order => {
-      const addressDetails = order.userId.address.id(order.addressId);
-      return {
-        ...order.toObject(),
-        deliveryAddress: addressDetails || {
-          _id: order.addressId,
-          firstName: 'Address',
-          lastName: 'Not Found',
-          street: 'Address not available',
-          city: 'N/A',
-          state: 'N/A',
-          postcode: 'N/A'
-        }
-      };
+
+    res.json({
+      success: true,
+      orders: orders.map((o) => ({
+        ...o.toObject(),
+        deliveryAddress: getDeliveryAddress(o.toObject())
+      }))
     });
-    
-    res.json({ success: true, orders: ordersWithAddress });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// Create new order
-exports.createOrder = async (req, res) => {
-  try {
-
-    const { userId, addressId, items, totalAmount } = req.body;
-
-    if (!userId || !addressId || !items || !totalAmount) {
-      return res.status(400).json({ success: false, message: 'UserId, addressId, items, and totalAmount are required' });
-    }
-
-    const order = new Order({ userId, addressId, items, totalAmount });
-    await order.save();
-
-
-    const populatedOrder = await Order.findById(order._id)
-      .populate('userId', 'name email phone address')
-      .populate('items.itemId', 'name price');
-
-    const addressDetails = populatedOrder.userId.address.id(addressId);
-    const orderWithAddress = {
-      ...populatedOrder.toObject(),
-      deliveryAddress: addressDetails || {
-        _id: addressId,
-        firstName: 'Address',
-        lastName: 'Not Found',
-        street: 'Address not available'
-      }
-    };
-
-    res.status(201).json({ success: true, order: orderWithAddress });
-  } catch (error) {
-    console.error('Error creating order:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
+// Deprecated
+exports.createOrder = (_, res) => {
+  res.status(400).json({
+    success: false,
+    message:
+      'Order creation handled via /api/payment/create-order endpoint'
+  });
 };

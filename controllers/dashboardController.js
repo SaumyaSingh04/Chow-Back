@@ -10,6 +10,8 @@ exports.getDashboardStats = async (req, res) => {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
+    const todayRange = { $gte: today, $lt: tomorrow };
+
     const [
       newOrders,
       totalCustomers,
@@ -18,18 +20,18 @@ exports.getDashboardStats = async (req, res) => {
       failedOrders
     ] = await Promise.all([
       Order.countDocuments({ 
-        createdAt: { $gte: today, $lt: tomorrow },
+        createdAt: todayRange,
         status: { $ne: 'failed' }
       }),
       User.countDocuments({ status: 'active' }),
       Ticket.countDocuments({ 
         status: 'resolved',
-        updatedAt: { $gte: today, $lt: tomorrow }
+        updatedAt: todayRange
       }),
       Order.aggregate([
         {
           $match: {
-            createdAt: { $gte: today, $lt: tomorrow },
+            createdAt: todayRange,
             paymentStatus: 'paid'
           }
         },
@@ -41,8 +43,12 @@ exports.getDashboardStats = async (req, res) => {
         }
       ]),
       Order.countDocuments({
-        createdAt: { $gte: today, $lt: tomorrow },
-        status: 'failed'
+        createdAt: todayRange,
+        $or: [
+          { status: 'failed' },
+          { paymentStatus: 'failed' },
+          { status: 'cancelled', paymentStatus: 'cancelled' }
+        ]
       })
     ]);
 
@@ -50,7 +56,7 @@ exports.getDashboardStats = async (req, res) => {
       newOrders,
       totalCustomers,
       ticketsResolved,
-      revenueToday: revenueToday[0]?.total || 0,
+      revenueToday: (revenueToday[0]?.total || 0) / 100,
       failedOrders
     });
   } catch (error) {
@@ -58,16 +64,3 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
-// Get failed orders
-exports.getFailedOrders = async (req, res) => {
-  try {
-    const failedOrders = await Order.find({ status: 'failed' })
-      .populate('customerId', 'name email phone')
-      .populate('items.itemId', 'name price')
-      .sort({ createdAt: -1 });
-    
-    res.json({ success: true, orders: failedOrders });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};

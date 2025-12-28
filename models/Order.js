@@ -4,7 +4,8 @@ const orderSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'user',
-    required: true
+    required: true,
+    index: true
   },
   addressId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -18,29 +19,63 @@ const orderSchema = new mongoose.Schema({
     },
     quantity: {
       type: Number,
-      required: true
+      required: true,
+      min: 1
     },
     price: {
       type: Number,
-      required: true
+      required: true,
+      min: 0
     }
   }],
+  distance: {
+    type: Number,
+    min: 0
+  },
+  deliveryFee: {
+    type: Number,
+    min: 0
+  },
   totalAmount: {
     type: Number,
-    required: true
+    required: true,
+    min: 0
+  },
+  currency: {
+    type: String,
+    default: 'INR'
   },
   status: {
     type: String,
     enum: ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled', 'failed'],
-    default: 'pending'
+    default: 'pending',
+    index: true
   },
   paymentStatus: {
     type: String,
-    enum: ['pending', 'paid', 'failed'],
-    default: 'pending'
-  }
+    enum: ['pending', 'paid', 'failed', 'cancelled'],
+    default: 'pending',
+    index: true
+  },
+  razorpayData: [{
+    orderId: String,
+    paymentId: String,
+    signature: String,
+    amount: Number,
+    currency: String,
+    status: String,
+    method: String,
+    errorReason: String,
+    createdAt: { type: Date, default: Date.now }
+  }],
+  confirmedAt: Date,
+  cancelledAt: Date
 }, {
   timestamps: true
 });
+
+// Indexes for better query performance
+orderSchema.index({ userId: 1, createdAt: -1 });
+orderSchema.index({ status: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Order', orderSchema);

@@ -5,6 +5,9 @@ const orderController = require('../controllers/orderController');
 // Get all orders
 router.get('/', orderController.getAllOrders);
 
+// Get failed orders
+router.get('/failed', orderController.getFailedOrders);
+
 // Get orders by user ID
 router.get('/my/:userId', orderController.getMyOrders);
 
@@ -19,8 +22,5 @@ router.patch('/:id/status', orderController.updateOrderStatus);
 
 // Update payment status
 router.patch('/:id/payment-status', orderController.updatePaymentStatus);
-
-// Update both order and payment status
-router.patch('/:id', orderController.updateOrderAndPaymentStatus);
 
 module.exports = router;
