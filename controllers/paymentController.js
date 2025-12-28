@@ -27,13 +27,13 @@ exports.createOrder = async (req, res) => {
     }
 
     // Server-side amount calculation in paise
-    const calculatedAmount = orderData.items.reduce(
+    const subtotal = orderData.items.reduce(
       (sum, i) => sum + i.price * i.quantity,
       0
-    ) + (orderData.deliveryFee || 0);
+    );
 
-    const gstAmount = calculatedAmount * 0.05;
-    const finalAmountInPaise = Math.round((calculatedAmount + gstAmount) * 100);
+    const gstAmount = subtotal * 0.05; // GST only on items, not delivery
+    const finalAmountInPaise = Math.round((subtotal + gstAmount + (orderData.deliveryFee || 0)) * 100);
 
     const razorpayOrder = await razorpay.orders.create({
       amount: finalAmountInPaise,
