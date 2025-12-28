@@ -17,7 +17,7 @@ const updateStock = async (items = []) => {
   }
 };
 
-/* -------------------- CREATE ORDER (PENDING) -------------------- */
+/* -------------------- CREATE ORDER (PENDING) --------------- */
 exports.createOrder = async (req, res) => {
   try {
     const { orderData } = req.body;
@@ -116,7 +116,7 @@ exports.verifyPayment = async (req, res) => {
 
       await order.save();
     } else {
-      // Store payment ID for webhook processing
+      // Store payment ID for webhook process
       order.razorpayData.push({
         orderId: razorpay_order_id,
         paymentId: razorpay_payment_id,
