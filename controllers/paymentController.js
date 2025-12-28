@@ -32,7 +32,7 @@ exports.createOrder = async (req, res) => {
       0
     );
 
-    const gstAmount = subtotal * 0.05; // GST only on items, not delivery
+    const gstAmount = subtotal * 0.05; // GST only on items, not on delivery charges
     const finalAmountInPaise = Math.round((subtotal + gstAmount + (orderData.deliveryFee || 0)) * 100);
 
     const razorpayOrder = await razorpay.orders.create({
