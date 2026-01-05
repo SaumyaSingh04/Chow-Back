@@ -41,6 +41,8 @@ app.use("/api/admin", require("./routes/adminRoutes"));
 app.use("/api", require("./routes/distanceRoutes"));
 app.use("/api/payment", require("./routes/paymentRoutes"));
 app.use("/api/sweet-deals", require("./routes/sweetDealRoutes"));
+app.use("/api/delhivery", require("./routes/delhiveryRoutes"));
+app.use("/api/delivery", require("./routes/deliveryRoutes"));
 
 /* -------------------- HEALTH -------------------- */
 app.get("/", (req, res) => {

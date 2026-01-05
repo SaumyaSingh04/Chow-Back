@@ -2,7 +2,6 @@ const Order = require('../models/Order');
 
 const TAX_RATE = 0.05;
 
-/* -------------------- QUERIES -------------------- */
 const SUCCESS_ORDER_QUERY = {
   status: { $in: ['confirmed', 'shipped', 'delivered'] },
   paymentStatus: 'paid'
@@ -17,7 +16,6 @@ const FAILED_ORDER_QUERY = {
   ]
 };
 
-/* -------------------- HELPERS -------------------- */
 const formatAddress = (address) => {
   if (!address) return 'Address not available';
 
@@ -34,51 +32,44 @@ const formatAddress = (address) => {
 };
 
 const calculateOrderTotals = (items = [], deliveryFee = 0) => {
-  const subtotal = items.reduce(
-    (sum, i) => sum + i.price * i.quantity,
-    0
-  );
-
+  const subtotal = items.reduce((sum, i) => {
+    // Use the price from the item directly, not from itemId
+    const itemPrice = i.price || 0;
+    const itemQuantity = i.quantity || 0;
+    return sum + (itemPrice * itemQuantity);
+  }, 0);
   const tax = +(subtotal * TAX_RATE).toFixed(2);
 
   return {
     subtotal: +subtotal.toFixed(2),
     tax,
-    deliveryCharge: deliveryFee
+    deliveryCharge: +deliveryFee.toFixed(2)
   };
 };
 
 const getDeliveryAddress = (order) => {
   if (!order.userId?.address || !order.addressId) return null;
-
-  return (
-    order.userId.address.find(
-      (a) => String(a._id) === String(order.addressId)
-    ) || null
-  );
+  return order.userId.address.find(
+    (a) => String(a._id) === String(order.addressId)
+  ) || null;
 };
 
 const formatOrderData = (order) => {
   const o = order.toObject();
-
   const deliveryAddress = getDeliveryAddress(o);
   const { subtotal, tax, deliveryCharge } = calculateOrderTotals(
     o.items,
-    o.deliveryFee
+    o.shipping?.total || 0
   );
-
   const latestPayment = o.razorpayData?.at(-1) || {};
 
   return {
     orderId: o._id,
     orderDate: o.createdAt,
-
     customerName: o.userId?.name || 'N/A',
     customerEmail: o.userId?.email || 'N/A',
     customerPhone: o.userId?.phone || 'N/A',
-
     deliveryAddress: formatAddress(deliveryAddress),
-
     items: o.items,
     itemsString: o.items
       .map(
@@ -86,21 +77,31 @@ const formatOrderData = (order) => {
           `${i.itemId?.name || 'Unknown'} (Qty: ${i.quantity}, ₹${i.price})`
       )
       .join(', '),
-
     subtotal,
     tax,
     deliveryCharge,
     totalAmount: o.totalAmount,
-
     orderStatus: o.status,
     paymentStatus: o.paymentStatus,
-
     razorpayOrderId: latestPayment.orderId || null,
     razorpayPaymentId: latestPayment.paymentId || null,
     paymentMethod: latestPayment.method || null,
     paymentAmount: latestPayment.amount ? latestPayment.amount / 100 : 0,
-
-    distance: o.distance || 0
+    deliveryProvider: o.deliveryProvider || null,
+    deliveryStatus: o.deliveryStatus || null,
+    shipping: o.shipping || null,
+    shippingCharged: o.shipping?.charged || false,
+    shippingRefunded: o.shipping?.refunded || false,
+    shipmentCreated: o.shipmentCreated || false,
+    totalWeight: o.totalWeight || 0,
+    distance: o.distance || 0,
+    shipmentAttempts: o.shipmentAttempts || 0,
+    paymentMode: o.paymentMode || null,
+    rtoHandled: o.rtoHandled || false,
+    confirmedAt: o.confirmedAt || null,
+    waybill: o.waybill || null,
+    currency: o.currency || 'INR',
+    razorpayData: o.razorpayData || []
   };
 };
 
@@ -128,9 +129,6 @@ const getOrdersWithPagination = async (query, page, limit) => {
   };
 };
 
-/* -------------------- CONTROLLERS -------------------- */
-
-// Failed orders
 exports.getFailedOrders = async (req, res) => {
   try {
     const page = +req.query.page || 1;
@@ -148,7 +146,6 @@ exports.getFailedOrders = async (req, res) => {
   }
 };
 
-// Successful orders
 exports.getAllOrders = async (req, res) => {
   try {
     const page = +req.query.page || 1;
@@ -166,7 +163,6 @@ exports.getAllOrders = async (req, res) => {
   }
 };
 
-// Order by ID
 exports.getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -182,7 +178,7 @@ exports.getOrderById = async (req, res) => {
 
     const o = order.toObject();
     const deliveryAddress = getDeliveryAddress(o);
-    const summary = calculateOrderTotals(o.items, o.deliveryFee);
+    const summary = calculateOrderTotals(o.items, o.shipping?.total || 0);
 
     res.json({
       success: true,
@@ -204,7 +200,6 @@ exports.getOrderById = async (req, res) => {
   }
 };
 
-// Update order status
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
@@ -226,7 +221,6 @@ exports.updateOrderStatus = async (req, res) => {
   }
 };
 
-// Update payment status (ADMIN / SYSTEM ONLY)
 exports.updatePaymentStatus = async (req, res) => {
   try {
     const { paymentStatus } = req.body;
@@ -250,7 +244,6 @@ exports.updatePaymentStatus = async (req, res) => {
   }
 };
 
-// My orders
 exports.getMyOrders = async (req, res) => {
   try {
     const orders = await Order.find({
@@ -273,11 +266,3 @@ exports.getMyOrders = async (req, res) => {
   }
 };
 
-// Deprecated
-exports.createOrder = (_, res) => {
-  res.status(400).json({
-    success: false,
-    message:
-      'Order creation handled via /api/payment/create-order endpoint'
-  });
-};
