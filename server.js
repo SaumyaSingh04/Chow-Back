@@ -7,19 +7,14 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // CORS Configuration
-const corsOptions = {
-  origin: [
-    "https://chow-front.vercel.app",
-    "http://localhost:3000",
-    "http://localhost:5173",
-  ],
+app.use(cors({
+  origin: ["https://chow-front.vercel.app", "http://localhost:3000", "http://localhost:5173"],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-};
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+// Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -27,27 +22,25 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.get("/favicon.ico", (req, res) => res.status(204).end());
 
 // API Routes
-const routes = {
-  "/api/categories": require("./routes/categoryRoutes"),
-  "/api/subcategories": require("./routes/subcategoryRoutes"),
-  "/api/items": require("./routes/itemRoutes"),
-  "/api/dashboard": require("./routes/dashboardRoutes"),
-  "/api/search": require("./routes/searchRoutes"),
-  "/api/tickets": require("./routes/tickets"),
-  "/api/auth": require("./routes/authRoutes"),
-  "/api/orders": require("./routes/orderRoutes"),
-  "/api/users": require("./routes/userRoutes"),
-  "/api/admin": require("./routes/adminRoutes"),
-  "/api": require("./routes/distanceRoutes"),
-  "/api/payment": require("./routes/paymentRoutes"),
-  "/api/sweet-deals": require("./routes/sweetDealRoutes"),
-  "/api/delhivery": require("./routes/delhiveryRoutes"),
-  "/api/delivery": require("./routes/deliveryRoutes")
-};
+const routes = [
+  ["/api/categories", require("./routes/categoryRoutes")],
+  ["/api/subcategories", require("./routes/subcategoryRoutes")],
+  ["/api/items", require("./routes/itemRoutes")],
+  ["/api/dashboard", require("./routes/dashboardRoutes")],
+  ["/api/search", require("./routes/searchRoutes")],
+  ["/api/tickets", require("./routes/tickets")],
+  ["/api/auth", require("./routes/authRoutes")],
+  ["/api/orders", require("./routes/orderRoutes")],
+  ["/api/users", require("./routes/userRoutes")],
+  ["/api/admin", require("./routes/adminRoutes")],
+  ["/api", require("./routes/distanceRoutes")],
+  ["/api/payment", require("./routes/paymentRoutes")],
+  ["/api/sweet-deals", require("./routes/sweetDealRoutes")],
+  ["/api/delhivery", require("./routes/delhiveryRoutes")],
+  ["/api/delivery", require("./routes/deliveryRoutes")]
+];
 
-Object.entries(routes).forEach(([path, router]) => {
-  app.use(path, router);
-});
+routes.forEach(([path, router]) => app.use(path, router));
 
 // Health check
 app.get("/", (req, res) => {
@@ -65,38 +58,29 @@ app.use("*", (req, res) => {
 
 // Global error handler
 app.use((err, req, res, next) => {
-  console.error("Unhandled error:", err.message);
-  const isDev = process.env.NODE_ENV !== 'production';
+  console.error("Error:", err.message);
   res.status(err.status || 500).json({ 
     success: false,
-    error: isDev ? err.message : 'Internal server error'
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
   });
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
+// Process handlers
+const gracefulShutdown = (signal) => {
+  console.log(`${signal} received, shutting down gracefully`);
   process.exit(0);
-});
+};
 
-process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down gracefully');
-  process.exit(0);
-});
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason?.message || reason);
-  // Don't exit in production, just log
-  if (process.env.NODE_ENV !== 'production') {
-    process.exit(1);
-  }
+  console.error('Unhandled Rejection:', reason?.message || reason);
+  if (process.env.NODE_ENV !== 'production') process.exit(1);
 });
 
-// Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error?.message || error);
-  // Exit gracefully
   process.exit(1);
 });
 

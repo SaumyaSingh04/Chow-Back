@@ -1,8 +1,7 @@
 const axios = require('axios');
 const { isGorakhpurPincode } = require('../config/gorakhpurPincodes');
 
-// Create axios instance with default configuration
-const createAxiosInstance = (baseURL = null, timeout = 10000) => {
+const createAxiosInstance = (baseURL, timeout = 10000) => {
   return axios.create({
     ...(baseURL && { baseURL }),
     timeout,
@@ -24,7 +23,6 @@ class DistanceService {
 
       if (!fromCoords || !toCoords) return null;
 
-      // Try OSRM first, fallback to Haversine
       try {
         const response = await axiosInstance.get(
           `https://router.project-osrm.org/route/v1/driving/${fromCoords[0]},${fromCoords[1]};${toCoords[0]},${toCoords[1]}?overview=false`,
@@ -34,12 +32,12 @@ class DistanceService {
         if (response.data.routes?.[0]?.distance) {
           return Math.round(response.data.routes[0].distance / 1000 * 100) / 100;
         }
-      } catch (error) {
-        // Fallback to Haversine calculation
+      } catch {
+        // Fallback to Haversine
       }
 
       return this._haversineDistance(fromCoords[1], fromCoords[0], toCoords[1], toCoords[0]);
-    } catch (error) {
+    } catch {
       return null;
     }
   }
@@ -52,7 +50,7 @@ class DistanceService {
       );
       const data = response.data;
       return data[0] ? [parseFloat(data[0].lon), parseFloat(data[0].lat)] : null;
-    } catch (error) {
+    } catch {
       return null;
     }
   }
@@ -92,27 +90,14 @@ class DelhiveryService {
 
     try {
       const response = await this.axiosInstance.get('/api/kinko/v1/invoice/charges/.json', {
-        params: {
-          md: 'S',
-          ss: 'Delivered',
-          d_pin: pincode,
-          o_pin: this.pickupPincode,
-          cgm: 1
-        }
+        params: { md: 'S', ss: 'Delivered', d_pin: pincode, o_pin: this.pickupPincode, cgm: 1 }
       });
       
       const rateData = response.data?.[0];
-      if (rateData?.total_amount !== undefined) {
-        return {
-          success: true,
-          serviceable: true,
-          city: rateData.destination_city || 'Unknown',
-          state: rateData.destination_state || 'Unknown'
-        };
-      }
-      
-      return { success: false, serviceable: false };
-    } catch (error) {
+      return rateData?.total_amount !== undefined
+        ? { success: true, serviceable: true, city: rateData.destination_city || 'Unknown', state: rateData.destination_state || 'Unknown' }
+        : { success: false, serviceable: false };
+    } catch {
       return { success: false, serviceable: false };
     }
   }
@@ -129,25 +114,15 @@ class DelhiveryService {
     try {
       const response = await this.axiosInstance.get('/api/kinko/v1/invoice/charges/.json', {
         params: {
-          md: 'S',
-          ss: 'Delivered', 
-          d_pin: deliveryPincode,
-          o_pin: pickupPincode || this.pickupPincode,
-          cgm: Math.ceil(weight / 1000)
+          md: 'S', ss: 'Delivered', d_pin: deliveryPincode,
+          o_pin: pickupPincode || this.pickupPincode, cgm: Math.ceil(weight / 1000)
         }
       });
 
       const rateData = response.data?.[0];
-      if (!rateData) {
-        return { success: false, error: 'No rate data received' };
-      }
-
-      return {
-        success: true,
-        rate: rateData.total_amount || 0,
-        currency: 'INR',
-        breakdown: rateData
-      };
+      return rateData
+        ? { success: true, rate: rateData.total_amount || 0, currency: 'INR', breakdown: rateData }
+        : { success: false, error: 'No rate data received' };
     } catch (error) {
       return { success: false, error: `Rate calculation failed: ${error.message}` };
     }
@@ -171,24 +146,14 @@ class DelhiveryService {
       
       const response = await this.axiosInstance.post('/cmu/create.json', 
         `format=json&data=${JSON.stringify(shipmentData)}`,
-        {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          timeout: 15000
-        }
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 }
       );
 
       const packageData = response.data.packages?.[0];
       
-      if (!packageData?.waybill) {
-        return { success: false, error: 'No waybill received from Delhivery API' };
-      }
-
-      return {
-        success: true,
-        waybill: packageData.waybill,
-        status: 'SHIPMENT_CREATED',
-        estimatedDelivery: packageData.expected_delivery_date
-      };
+      return packageData?.waybill
+        ? { success: true, waybill: packageData.waybill, status: 'SHIPMENT_CREATED', estimatedDelivery: packageData.expected_delivery_date }
+        : { success: false, error: 'No waybill received from Delhivery API' };
     } catch (error) {
       console.error('Delhivery shipment creation error:', error.message);
       return { success: false, error: `Shipment creation failed: ${error.message}` };
@@ -205,11 +170,9 @@ class DelhiveryService {
     }
 
     try {
-      const response = await this.axiosInstance.get('/v1/packages/json/', {
-        params: { waybill }
-      });
-
+      const response = await this.axiosInstance.get('/v1/packages/json/', { params: { waybill } });
       const shipment = response.data.ShipmentData?.[0];
+      
       if (!shipment) {
         return { success: false, error: 'Shipment not found' };
       }
@@ -233,85 +196,68 @@ class DelhiveryService {
   }
 
   _buildShipmentPayload(orderData) {
-    try {
-      const requiredFields = ['customerName', 'address', 'pincode', 'city', 'state', 'phone', 'orderId'];
-      
-      for (const field of requiredFields) {
-        if (!orderData[field]) {
-          throw new Error(`Missing required field: ${field}`);
-        }
+    const requiredFields = ['customerName', 'address', 'pincode', 'city', 'state', 'phone', 'orderId'];
+    
+    for (const field of requiredFields) {
+      if (!orderData[field]) {
+        throw new Error(`Missing required field: ${field}`);
       }
-      
-      const env = process.env;
-      
-      const payload = {
-        shipments: [{
-          name: String(orderData.customerName || '').substring(0, 50),
-          add: String(orderData.address || '').substring(0, 200),
-          pin: String(orderData.pincode || ''),
-          city: String(orderData.city || '').substring(0, 50),
-          state: String(orderData.state || '').substring(0, 50),
-          country: 'India',
-          phone: String(orderData.phone || '').replace(/[^0-9]/g, '').substring(0, 10),
-          order: String(orderData.orderId || '').substring(0, 50),
-          payment_mode: orderData.paymentMode || 'PREPAID',
-          return_pin: env.RETURN_PINCODE || this.pickupPincode,
-          return_city: env.RETURN_CITY || 'Gorakhpur',
-          return_phone: env.RETURN_PHONE || '9999999999',
-          return_add: env.RETURN_ADDRESS || 'Return Address',
-          return_state: env.RETURN_STATE || 'Uttar Pradesh',
-          products_desc: String(orderData.itemsDescription || 'Food Items').substring(0, 300),
-          hsn_code: '21069099',
-          cod_amount: 0,
-          order_date: new Date().toISOString().split('T')[0],
-          total_amount: Math.round(Number(orderData.totalAmount) || 0),
-          seller_add: env.SELLER_ADDRESS || 'Seller Address',
-          seller_name: env.SELLER_NAME || 'Chow',
-          seller_inv: `INV-${Date.now()}`,
-          quantity: Number(orderData.totalQuantity) || 1,
-          waybill: '',
-          shipment_width: 15,
-          shipment_height: 10,
-          shipment_length: 20,
-          weight: Math.max(1, Math.ceil((Number(orderData.totalWeight) || 500) / 1000)),
-          seller_gst_tin: env.SELLER_GST || '',
-          shipping_mode: 'Surface',
-          address_type: 'home'
-        }]
-      };
-      
-      return payload;
-    } catch (error) {
-      throw new Error(`Failed to build shipment payload: ${error.message}`);
     }
+    
+    const env = process.env;
+    
+    return {
+      shipments: [{
+        name: String(orderData.customerName).substring(0, 50),
+        add: String(orderData.address).substring(0, 200),
+        pin: String(orderData.pincode),
+        city: String(orderData.city).substring(0, 50),
+        state: String(orderData.state).substring(0, 50),
+        country: 'India',
+        phone: String(orderData.phone).replace(/[^0-9]/g, '').substring(0, 10),
+        order: String(orderData.orderId).substring(0, 50),
+        payment_mode: orderData.paymentMode || 'PREPAID',
+        return_pin: env.RETURN_PINCODE || this.pickupPincode,
+        return_city: env.RETURN_CITY || 'Gorakhpur',
+        return_phone: env.RETURN_PHONE || '9999999999',
+        return_add: env.RETURN_ADDRESS || 'Return Address',
+        return_state: env.RETURN_STATE || 'Uttar Pradesh',
+        products_desc: String(orderData.itemsDescription || 'Food Items').substring(0, 300),
+        hsn_code: '21069099',
+        cod_amount: 0,
+        order_date: new Date().toISOString().split('T')[0],
+        total_amount: Math.round(Number(orderData.totalAmount) || 0),
+        seller_add: env.SELLER_ADDRESS || 'Seller Address',
+        seller_name: env.SELLER_NAME || 'Chow',
+        seller_inv: `INV-${Date.now()}`,
+        quantity: Number(orderData.totalQuantity) || 1,
+        waybill: '',
+        shipment_width: 15,
+        shipment_height: 10,
+        shipment_length: 20,
+        weight: Math.max(1, Math.ceil((Number(orderData.totalWeight) || 500) / 1000)),
+        seller_gst_tin: env.SELLER_GST || '',
+        shipping_mode: 'Surface',
+        address_type: 'home'
+      }]
+    };
   }
 
   _mapDelhiveryStatus(delhiveryStatus) {
-    if (!delhiveryStatus) return 'PENDING';
-    
     const statusMap = {
-      'Shipped': 'SHIPMENT_CREATED',
-      'Dispatched': 'SHIPMENT_CREATED',
-      'In transit': 'IN_TRANSIT',
-      'In Transit': 'IN_TRANSIT',
-      'Out for Delivery': 'IN_TRANSIT',
-      'Out For Delivery': 'IN_TRANSIT',
+      'Shipped': 'SHIPMENT_CREATED', 'Dispatched': 'SHIPMENT_CREATED',
+      'In transit': 'IN_TRANSIT', 'In Transit': 'IN_TRANSIT',
+      'Out for Delivery': 'IN_TRANSIT', 'Out For Delivery': 'IN_TRANSIT',
       'Delivered': 'DELIVERED',
-      'RTO Initiated': 'RTO',
-      'RTO-Initiated': 'RTO',
-      'RTO Delivered': 'RTO',
-      'RTO-Delivered': 'RTO',
-      'Cancelled': 'RTO',
-      'Lost': 'RTO',
-      'Damaged': 'RTO'
+      'RTO Initiated': 'RTO', 'RTO-Initiated': 'RTO', 'RTO Delivered': 'RTO',
+      'RTO-Delivered': 'RTO', 'Cancelled': 'RTO', 'Lost': 'RTO', 'Damaged': 'RTO'
     };
-    
     return statusMap[delhiveryStatus] || 'PENDING';
   }
 
   _mockCheckPincode(pincode) {
-    const nonServiceablePincodes = ['000000', '999999', '123456'];
-    return nonServiceablePincodes.includes(pincode)
+    const nonServiceable = ['000000', '999999', '123456'];
+    return nonServiceable.includes(pincode)
       ? { success: false, serviceable: false }
       : { success: true, serviceable: true, city: 'Mock City', state: 'Mock State' };
   }
@@ -325,21 +271,16 @@ class DelhiveryService {
     let estimatedDistance = 25;
     try {
       const realDistance = await this.distanceService.calculateDistance(
-        pickupPincode || this.pickupPincode, 
-        deliveryPincode
+        pickupPincode || this.pickupPincode, deliveryPincode
       );
       if (realDistance) estimatedDistance = realDistance;
-    } catch (error) {
+    } catch {
       // Use fallback distance
     }
     
     const totalRate = baseRate + weightRate + fuelSurcharge;
-    
     return {
-      success: true,
-      rate: totalRate,
-      distance: estimatedDistance,
-      currency: 'INR',
+      success: true, rate: totalRate, distance: estimatedDistance, currency: 'INR',
       breakdown: { baseRate, weightRate, fuelSurcharge, total: totalRate }
     };
   }
@@ -350,9 +291,7 @@ class DelhiveryService {
     const waybill = `MOCK${timestamp.toString().slice(-8)}${random}`;
     
     return {
-      success: true,
-      waybill,
-      status: 'SHIPMENT_CREATED',
+      success: true, waybill, status: 'SHIPMENT_CREATED',
       estimatedDelivery: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
     };
   }
@@ -361,22 +300,12 @@ class DelhiveryService {
     const waybillTime = parseInt(waybill.replace('MOCK', ''));
     const ageInHours = (Date.now() - waybillTime) / (1000 * 60 * 60);
     
-    let status = 'SHIPMENT_CREATED';
-    let location = 'Origin Hub';
-    
-    if (ageInHours > 24) {
-      status = 'IN_TRANSIT';
-      location = 'Transit Hub';
-    }
-    if (ageInHours > 48) {
-      status = 'DELIVERED';
-      location = 'Destination';
-    }
+    let status = 'SHIPMENT_CREATED', location = 'Origin Hub';
+    if (ageInHours > 24) { status = 'IN_TRANSIT'; location = 'Transit Hub'; }
+    if (ageInHours > 48) { status = 'DELIVERED'; location = 'Destination'; }
     
     return {
-      success: true,
-      status,
-      location,
+      success: true, status, location,
       expectedDelivery: new Date(waybillTime + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       trackingHistory: [
         { status: 'SHIPMENT_CREATED', timestamp: new Date(waybillTime).toISOString(), location: 'Origin Hub' },
@@ -414,50 +343,28 @@ class DeliveryService {
     const charge = Math.round(baseRate + distanceRate + weightRate);
 
     return {
-      success: true,
-      serviceable: true,
-      provider: 'self',
-      displayName: 'Local Delivery',
-      charge,
-      distance,
-      eta: '1-2 hours',
+      success: true, serviceable: true, provider: 'self', displayName: 'Local Delivery',
+      charge, distance, eta: '1-2 hours',
       breakdown: { baseRate, distanceRate, weightRate, total: charge }
     };
   }
 
   async _getDelhiveryPricing(pincode, weight) {
     try {
-      const response = await this.delhiveryService.calculateRate({
-        deliveryPincode: pincode,
-        weight
-      });
+      const response = await this.delhiveryService.calculateRate({ deliveryPincode: pincode, weight });
 
       if (!response.success) {
-        return {
-          success: false,
-          serviceable: false,
-          error: response.error || 'Pincode not serviceable'
-        };
+        return { success: false, serviceable: false, error: response.error || 'Pincode not serviceable' };
       }
 
       const distance = await this.distanceService.calculateDistance(this.basePincode, pincode);
 
       return {
-        success: true,
-        serviceable: true,
-        provider: 'delhivery',
-        displayName: 'Delhivery',
-        charge: response.rate,
-        distance,
-        eta: '1-3 business days',
-        breakdown: response.breakdown
+        success: true, serviceable: true, provider: 'delhivery', displayName: 'Delhivery',
+        charge: response.rate, distance, eta: '1-3 business days', breakdown: response.breakdown
       };
-    } catch (error) {
-      return {
-        success: false,
-        serviceable: false,
-        error: 'Delivery service unavailable'
-      };
+    } catch {
+      return { success: false, serviceable: false, error: 'Delivery service unavailable' };
     }
   }
 
@@ -476,22 +383,17 @@ class DeliveryService {
   }
 
   shouldCreateDelhiveryShipment(order) {
-    if (!order) return false;
-    return order.deliveryProvider === 'delhivery' && 
-           order.paymentStatus === 'paid' && 
-           order.status === 'confirmed' && 
-           !order.waybill;
+    return order?.deliveryProvider === 'delhivery' && 
+           order?.paymentStatus === 'paid' && 
+           order?.status === 'confirmed' && 
+           !order?.waybill;
   }
 }
 
 // ==================== EXPORTS ====================
 
-const distanceService = new DistanceService();
-const delhiveryService = new DelhiveryService();
-const deliveryService = new DeliveryService();
-
 module.exports = {
-  distanceService,
-  delhiveryService,
-  deliveryService
+  distanceService: new DistanceService(),
+  delhiveryService: new DelhiveryService(),
+  deliveryService: new DeliveryService()
 };
