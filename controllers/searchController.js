@@ -22,7 +22,8 @@ exports.globalSearch = async (req, res) => {
           { shortDesc: searchRegex },
           { longDesc: searchRegex }
         ],
-        status: 'Active'
+        status: 'Active',
+        stockQty: { $gt: 0 }
       })
       .populate('category', 'name')
       .populate('subcategory', 'name')
@@ -87,7 +88,7 @@ exports.searchItems = async (req, res) => {
       page = 1
     } = req.query;
 
-    const query = { status: 'Active' };
+    const query = { status: 'Active', stockQty: { $gt: 0 } };
     
     if (q) {
       const searchRegex = new RegExp(q, 'i');

@@ -38,14 +38,15 @@ const uploadFiles = async (files) => {
 // Get all items
 exports.getItems = handleAsyncRoute(async (req, res) => {
   const { page, limit, skip } = getPaginationParams(req.query);
+  const query = { stockQty: { $gt: 0 } };
 
   const [items, total] = await Promise.all([
-    Item.find()
+    Item.find(query)
       .populate(POPULATE_OPTIONS)
       .skip(skip)
       .limit(limit)
       .sort({ createdAt: -1 }),
-    Item.countDocuments()
+    Item.countDocuments(query)
   ]);
   
   res.json({
@@ -63,8 +64,8 @@ exports.getItems = handleAsyncRoute(async (req, res) => {
 // Get item by ID
 exports.getItemById = handleAsyncRoute(async (req, res) => {
   const item = await Item.findById(req.params.id).populate(POPULATE_OPTIONS);
-  if (!item) {
-    return res.status(404).json({ success: false, message: 'Item not found' });
+  if (!item || item.stockQty <= 0) {
+    return res.status(404).json({ success: false, message: 'Item not found or out of stock' });
   }
   res.json({ success: true, item });
 });
