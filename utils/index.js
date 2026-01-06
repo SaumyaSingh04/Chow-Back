@@ -12,33 +12,53 @@ const verifyRazorpaySignature = (orderId, paymentId, signature) => {
 };
 
 const processPaymentConfirmation = async (order, paymentData) => {
-  if (order.paymentStatus === 'paid') {
-    return { success: true, message: 'Already confirmed' };
+  try {
+    if (order.paymentStatus === 'paid') {
+      return { success: true, message: 'Already confirmed' };
+    }
+
+    // Prevent confirmation of cancelled orders
+    if (order.paymentStatus === 'cancelled' || order.status === 'cancelled') {
+      return { success: false, message: 'Cannot confirm payment for cancelled order' };
+    }
+
+    // Update stock only after successful payment
+    const Item = require('../models/Item');
+    for (const item of order.items) {
+      await Item.findByIdAndUpdate(
+        item.itemId,
+        { $inc: { stockQty: -item.quantity } }
+      );
+    }
+
+    Object.assign(order, {
+      paymentStatus: 'paid',
+      status: 'confirmed',
+      confirmedAt: new Date(),
+      cancelledAt: undefined // Clear cancelled timestamp
+    });
+
+    order.razorpayData.push({
+      paymentId: paymentData.id,
+      amount: paymentData.amount,
+      status: 'paid',
+      method: paymentData.method,
+      source: paymentData.source || 'api',
+      signatureVerified: true,
+      attemptNumber: (order.razorpayData.length || 0) + 1,
+      createdAt: new Date()
+    });
+
+    await order.save();
+
+    const shouldCreateShipment = deliveryService.shouldCreateDelhiveryShipment(order);
+    console.log(`Payment confirmed for ${shouldCreateShipment ? 'Delhivery' : 'local delivery'} order:`, order._id);
+
+    return { success: true, orderId: order._id };
+  } catch (error) {
+    console.error('Payment confirmation error:', error);
+    throw error;
   }
-
-  Object.assign(order, {
-    paymentStatus: 'paid',
-    status: 'confirmed',
-    confirmedAt: new Date()
-  });
-
-  order.razorpayData.push({
-    paymentId: paymentData.id,
-    amount: paymentData.amount,
-    status: 'paid',
-    method: paymentData.method,
-    source: paymentData.source || 'api',
-    signatureVerified: paymentData.signatureVerified || false,
-    attemptNumber: (order.razorpayData.length || 0) + 1,
-    createdAt: new Date()
-  });
-
-  await order.save();
-
-  const shouldCreateShipment = deliveryService.shouldCreateDelhiveryShipment(order);
-  console.log(`Payment confirmed for ${shouldCreateShipment ? 'Delhivery' : 'local delivery'} order:`, order._id);
-
-  return { success: true, orderId: order._id };
 };
 
 // ==================== SHIPMENT UTILITIES ====================

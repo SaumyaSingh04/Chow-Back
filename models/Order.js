@@ -134,7 +134,7 @@ const orderSchema = new mongoose.Schema({
     status: String,
     method: String,
     errorReason: String,
-    source: { type: String, enum: ['api', 'webhook'], default: 'api' },
+    source: { type: String, enum: ['api', 'webhook', 'verify_payment', 'manual_confirmation'], default: 'api' },
     signatureVerified: { type: Boolean, default: false },
     attemptNumber: { type: Number, default: 1 },
     failureCode: String,

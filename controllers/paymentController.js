@@ -48,8 +48,8 @@ exports.createOrder = async (req, res) => {
     }
 
     // Calculate total weight using order method
-    const order = new Order({ items: orderData.items });
-    const totalWeight = order.calculateWeight();
+    const tempOrder = new Order({ items: orderData.items });
+    const totalWeight = tempOrder.calculateWeight();
 
     // Get delivery information using centralized service
     const deliveryInfo = await deliveryService.getDeliveryInfo(orderData.deliveryPincode, totalWeight);
@@ -99,6 +99,7 @@ exports.createOrder = async (req, res) => {
         eta: deliveryETA
       },
       totalWeight,
+      distance: deliveryInfo.distance || 0,
       paymentMode: 'PREPAID',
       deliveryProvider,
       deliveryProviderDisplay: deliveryInfo.displayName,
@@ -115,8 +116,7 @@ exports.createOrder = async (req, res) => {
       }]
     });
 
-    // Update stock after successful order creation
-    await updateStock(orderData.items);
+    // DON'T update stock here - only after payment confirmation
 
     res.json({
       success: true,
@@ -177,6 +177,7 @@ exports.verifyPayment = async (req, res) => {
         paymentId: razorpay_payment_id,
         signature: razorpay_signature,
         status: 'signature_verified',
+        signatureVerified: true,
         createdAt: new Date()
       });
       
@@ -185,7 +186,8 @@ exports.verifyPayment = async (req, res) => {
 
     res.json({ success: true, orderId: order._id });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Payment verification failed' });
+    console.error('Payment verification error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Payment verification failed' });
   }
 };
 
@@ -251,44 +253,76 @@ exports.razorpayWebhook = async (req, res) => {
     const event = req.body.event;
     const payment = req.body.payload.payment.entity;
 
-    console.log('Processing event:', event, 'for payment:', payment.id);
+    console.log('Processing webhook event:', event, 'for payment:', payment.id);
 
     const order = await Order.findOne({
       'razorpayData.orderId': payment.order_id
     });
 
     if (!order) {
-      console.log('Order not found for:', payment.order_id);
-      return res.status(200).end();
+      console.log('Order not found for Razorpay order:', payment.order_id);
+      return res.status(200).json({ received: true, message: 'Order not found' });
     }
 
-    // Idempotency protection
-    if (order.paymentStatus === 'paid') {
-      console.log('Order already paid');
-      return res.status(200).end();
+    console.log(`Found order ${order._id} with status: ${order.status}, paymentStatus: ${order.paymentStatus}`);
+
+    // Handle different webhook events
+    switch (event) {
+      case 'payment.captured':
+        if (order.paymentStatus === 'paid') {
+          console.log('Order already confirmed, skipping');
+          break;
+        }
+        
+        console.log('Processing payment.captured for order:', order._id);
+        const result = await processPaymentConfirmation(order, {
+          ...payment,
+          source: 'webhook'
+        });
+        
+        if (result.success) {
+          console.log('✅ Payment confirmed via webhook for order:', order._id);
+        } else {
+          console.log('❌ Payment confirmation failed:', result.message);
+        }
+        break;
+
+      case 'payment.failed':
+        console.log('Processing payment.failed for order:', order._id);
+        if (order.paymentStatus !== 'paid') {
+          order.paymentStatus = 'failed';
+          order.status = 'failed';
+          order.razorpayData.push({
+            status: 'failed',
+            errorReason: payment.error_description || 'Payment failed',
+            source: 'webhook',
+            createdAt: new Date()
+          });
+          await order.save();
+          console.log('Order marked as failed via webhook');
+        }
+        break;
+
+      case 'payment.authorized':
+        console.log('Payment authorized but not captured yet for order:', order._id);
+        order.razorpayData.push({
+          paymentId: payment.id,
+          status: 'authorized',
+          amount: payment.amount,
+          method: payment.method,
+          source: 'webhook',
+          createdAt: new Date()
+        });
+        await order.save();
+        break;
+
+      default:
+        console.log('Unhandled webhook event:', event);
     }
 
-    if (event === 'payment.captured') {
-      console.log('Confirming payment for order:', order._id);
-      
-      await processPaymentConfirmation(order, {
-        ...payment,
-        source: 'webhook'
-      });
-      
-      console.log('Payment confirmed via webhook');
-    }
-
-    if (event === 'payment.failed') {
-      console.log('Payment failed for order:', order._id);
-      order.paymentStatus = 'failed';
-      order.status = 'failed';
-      await order.save();
-    }
-
-    res.status(200).json({ received: true });
+    res.status(200).json({ received: true, event, orderId: order._id });
   } catch (err) {
-    console.error('Webhook error:', err);
+    console.error('Webhook processing error:', err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -358,24 +392,45 @@ exports.fixInconsistentOrders = async (req, res) => {
 
 exports.cleanFailedOrders = async (req, res) => {
   try {
-    const result = await Order.deleteMany({
+    // Use the same query as getFailedOrders to ensure consistency
+    const failedOrdersQuery = {
       $or: [
         { status: 'failed' },
-        { paymentStatus: 'failed' },
-        {
-          status: 'pending',
-          paymentStatus: 'pending',
-          createdAt: { $lt: new Date(Date.now() - 24 * 60 * 60 * 1000) }
-        }
+        { status: 'cancelled' },
+        { status: 'pending' },
+        { paymentStatus: 'failed' }
       ]
-    });
+    };
+
+    // Find orders to be deleted first to restock items
+    const ordersToDelete = await Order.find(failedOrdersQuery).populate('items.itemId');
+
+    // Restock items for cancelled/failed orders
+    for (const order of ordersToDelete) {
+      if (order.items && order.items.length > 0) {
+        for (const item of order.items) {
+          if (item.itemId) {
+            await Item.findByIdAndUpdate(
+              item.itemId._id,
+              { $inc: { stockQty: item.quantity } }
+            );
+          }
+        }
+      }
+    }
+
+    // Delete the orders using the same query
+    const result = await Order.deleteMany(failedOrdersQuery);
 
     res.json({
       success: true,
-      deleted: result.deletedCount
+      message: `Successfully deleted ${result.deletedCount} failed orders and restocked ${ordersToDelete.length} orders`,
+      deleted: result.deletedCount,
+      restocked: ordersToDelete.length
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Cleanup failed' });
+    console.error('Clean failed orders error:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
