@@ -1,5 +1,6 @@
 const Order = require('../models/Order');
 const { delhiveryService } = require('../services');
+const { updateOrderSignals } = require('../utils/orderStatusDeriver');
 
 /**
  * Handle Delhivery webhook for shipment status updates
@@ -34,9 +35,9 @@ exports.delhiveryWebhook = async (req, res) => {
       return res.status(200).json({ message: 'Order not found' });
     }
 
-    // CRITICAL: Block webhook updates for self-delivery orders
-    if (order.deliveryProvider === 'self') {
-      console.log(`BLOCKED: Webhook attempted to update self-delivery order ${order._id}`);
+    // CRITICAL: Block webhook updates for SELF delivery orders
+    if (order.deliveryProvider === 'SELF') {
+      console.log(`BLOCKED: Webhook attempted to update SELF delivery order ${order._id}`);
       return res.status(200).json({ ignored: 'Self delivery order' });
     }
 
@@ -47,43 +48,43 @@ exports.delhiveryWebhook = async (req, res) => {
       'Dispatched': 'SHIPMENT_CREATED',
       'In transit': 'IN_TRANSIT',
       'In Transit': 'IN_TRANSIT',
-      'Out for Delivery': 'IN_TRANSIT',
-      'Out For Delivery': 'IN_TRANSIT',
+      'Out for Delivery': 'OUT_FOR_DELIVERY',
+      'Out For Delivery': 'OUT_FOR_DELIVERY',
       'Delivered': 'DELIVERED',
       'RTO Initiated': 'RTO',
       'RTO-Initiated': 'RTO',
       'RTO Delivered': 'RTO',
       'RTO-Delivered': 'RTO',
-      'Cancelled': 'RTO',
+      'Cancelled': 'PRE_PICKUP_CANCEL', // Distinguish from post-pickup RTO
       'Lost': 'RTO',
       'Damaged': 'RTO'
     };
 
-    const newDeliveryStatus = statusMap[statusToMap] || order.deliveryStatus;
+    const newDeliveryStatus = statusMap[statusToMap];
     
-    // Only update if status has changed
-    if (newDeliveryStatus !== order.deliveryStatus) {
+    // Only update if we have a valid mapping and status has changed
+    if (newDeliveryStatus && newDeliveryStatus !== order.deliveryStatus) {
       const oldStatus = order.deliveryStatus;
-      order.deliveryStatus = newDeliveryStatus;
       
-      // Update order status based on delivery status
-      if (newDeliveryStatus === 'DELIVERED') {
-        order.status = 'delivered';
-      } else if (newDeliveryStatus === 'RTO') {
-        order.status = 'cancelled';
-        // Handle RTO - restock items if not already handled
-        if (!order.rtoHandled) {
-          await handleRTO(order);
-          order.rtoHandled = true;
-        }
-      } else if (newDeliveryStatus === 'IN_TRANSIT' && order.status === 'confirmed') {
-        order.status = 'shipped';
+      // Handle RTO and cancellations atomically
+      if (newDeliveryStatus === 'RTO') {
+        await handleRTOAtomic(order._id);
+      } else if (newDeliveryStatus === 'PRE_PICKUP_CANCEL') {
+        await handlePrePickupCancelAtomic(order._id);
       }
       
-      await order.save();
-      console.log(`Order ${order._id} delivery status updated: ${oldStatus} → ${newDeliveryStatus}`);
+      // Use updateOrderSignals with WEBHOOK source
+      const updateFields = updateOrderSignals(order, { deliveryStatus: newDeliveryStatus }, { source: 'WEBHOOK' });
+      
+      await Order.findByIdAndUpdate(
+        order._id,
+        updateFields,
+        { new: true, runValidators: true }
+      );
+      
+      console.log(`Order ${order._id} delivery status updated: ${oldStatus} → ${newDeliveryStatus}, status: ${updateFields.status}`);
     } else {
-      console.log(`Order ${order._id} status unchanged: ${newDeliveryStatus}`);
+      console.log(`Order ${order._id} status unchanged or invalid mapping: ${statusToMap}`);
     }
 
     res.status(200).json({ received: true, orderId: order._id });
@@ -94,29 +95,92 @@ exports.delhiveryWebhook = async (req, res) => {
   }
 };
 
-// Helper function to handle RTO (Return to Origin)
-const handleRTO = async (order) => {
+// Atomic pre-pickup cancel handler - no RTO costs
+const handlePrePickupCancelAtomic = async (orderId) => {
   try {
     const Item = require('../models/Item');
     
-    // Restock items
-    for (const item of order.items) {
-      await Item.findByIdAndUpdate(
-        item.itemId,
-        { $inc: { stockQty: item.quantity } }
-      );
+    // Atomic update: only process if not already handled
+    const order = await Order.findOneAndUpdate(
+      { 
+        _id: orderId, 
+        cancelHandled: { $ne: true }
+      },
+      { 
+        $set: { cancelHandled: true }
+      },
+      { new: true }
+    );
+    
+    if (!order) {
+      console.log(`Cancel already handled or order not found: ${orderId}`);
+      return;
     }
     
-    // Calculate RTO charges (forward + return shipping only)
-    const forwardShipping = order.shipping?.total || 0;
-    const rtoCharges = forwardShipping * 2; // Approximate RTO cost
+    // Restock items (no shipping costs since never picked up)
+    const restockPromises = order.items.map(item => 
+      Item.findByIdAndUpdate(
+        item.itemId,
+        { $inc: { stockQty: item.quantity } }
+      )
+    );
     
-    order.rtoCharges = rtoCharges;
-    order.logisticsLoss = rtoCharges;
+    await Promise.all(restockPromises);
     
-    console.log(`RTO handled for order ${order._id}: Items restocked, RTO charges: ₹${rtoCharges}`);
+    console.log(`Pre-pickup cancel handled for order ${orderId}: Items restocked, no RTO charges`);
   } catch (error) {
-    console.error('RTO handling error:', error);
+    console.error('Pre-pickup cancel handling error:', error);
+  }
+};
+
+// Atomic RTO handler - prevents race conditions
+const handleRTOAtomic = async (orderId) => {
+  try {
+    const Item = require('../models/Item');
+    
+    // Atomic update: only process RTO if not already handled
+    const order = await Order.findOneAndUpdate(
+      { 
+        _id: orderId, 
+        rtoHandled: { $ne: true } // Only if not already handled
+      },
+      { 
+        $set: { rtoHandled: true }
+      },
+      { new: true }
+    );
+    
+    // If order not found or already handled, skip
+    if (!order) {
+      console.log(`RTO already handled or order not found: ${orderId}`);
+      return;
+    }
+    
+    // Restock items atomically
+    const restockPromises = order.items.map(item => 
+      Item.findByIdAndUpdate(
+        item.itemId,
+        { $inc: { stockQty: item.quantity } }
+      )
+    );
+    
+    await Promise.all(restockPromises);
+    
+    // Calculate and save RTO charges
+    const forwardShipping = order.shipping?.total || 0;
+    const rtoCharges = forwardShipping * 2;
+    
+    await Order.findByIdAndUpdate(
+      orderId,
+      {
+        rtoCharges,
+        logisticsLoss: rtoCharges
+      }
+    );
+    
+    console.log(`RTO handled atomically for order ${orderId}: Items restocked, RTO charges: ₹${rtoCharges}`);
+  } catch (error) {
+    console.error('Atomic RTO handling error:', error);
   }
 };
 
@@ -202,10 +266,25 @@ exports.createShipment = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
+    // Validate order state before shipment creation
     if (order.paymentStatus !== 'paid') {
       return res.status(400).json({ 
         success: false, 
         message: 'Cannot create shipment for unpaid order' 
+      });
+    }
+
+    if (order.status !== 'confirmed') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Order must be confirmed before shipment creation' 
+      });
+    }
+
+    if (order.deliveryProvider !== 'DELHIVERY') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Shipment creation only for DELHIVERY orders' 
       });
     }
 
@@ -214,6 +293,13 @@ exports.createShipment = async (req, res) => {
         success: false, 
         message: 'Shipment already created',
         waybill: order.waybill
+      });
+    }
+
+    if ((order.shipmentAttempts || 0) >= 3) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Maximum shipment attempts exceeded' 
       });
     }
     
@@ -250,16 +336,28 @@ exports.createShipment = async (req, res) => {
     const result = await delhiveryService.createShipment(shipmentData);
     
     if (result.success) {
-      order.waybill = result.waybill;
-      order.deliveryStatus = result.status;
-      order.status = 'shipped';
-      order.shipmentCreated = true;
-      if (order.shipping) {
-        order.shipping.charged = true;
-      }
-      await order.save();
+      // Use updateOrderSignals with WEBHOOK source for shipment creation
+      const updateFields = updateOrderSignals(order, { deliveryStatus: result.status }, { source: 'WEBHOOK' });
+      
+      await Order.findByIdAndUpdate(
+        order._id,
+        {
+          ...updateFields,
+          waybill: result.waybill,
+          shipmentCreated: true,
+          shipmentAttempts: (order.shipmentAttempts || 0) + 1,
+          'shipping.charged': order.shipping ? true : undefined
+        },
+        { new: true, runValidators: true }
+      );
       
       console.log(`Shipment created for order ${order._id}: ${result.waybill}`);
+    } else {
+      // Increment attempt counter even on failure
+      await Order.findByIdAndUpdate(
+        order._id,
+        { $inc: { shipmentAttempts: 1 } }
+      );
     }
 
     res.json({
